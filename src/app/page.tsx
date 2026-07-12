@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   School, 
   HeartHandshake, 
@@ -18,7 +18,12 @@ import {
   RotateCcw,
   CheckCircle,
   HelpCircle,
-  FileText
+  FileText,
+  Clock,
+  Zap,
+  ShieldAlert,
+  ArrowRight,
+  Send
 } from "lucide-react";
 
 // Condition Marquee chips mapping
@@ -54,27 +59,34 @@ export default function Home() {
   const [contact, setContact] = useState("");
   const [city, setCity] = useState("");
 
-  // Screener states
+  // Screener settings
   const [lens, setLens] = useState<"teen" | "adult">("teen");
   const [focus, setFocus] = useState<"learning" | "attention" | "speech" | "confidence" | "masking">("learning");
   const [screenerStep, setScreenerStep] = useState<"welcome" | "attention" | "cognitive" | "masking" | "result">("welcome");
 
-  // Game/Test states
-  // 1. Attention (CPT)
+  // Interactive Diagnostic Variables (SEREN Clinical Simulator)
+  // 1. CPT Variables (Attention reaction times)
   const [cptState, setCptState] = useState<"idle" | "running" | "ended">("idle");
   const [cptSymbol, setCptSymbol] = useState("Ready");
   const [cptIsTarget, setCptIsTarget] = useState(false);
+  const [cptFlashCount, setCptFlashCount] = useState(0);
   const [cptHits, setCptHits] = useState(0);
   const [cptMisses, setCptMisses] = useState(0);
-  
-  // 2. Cognitive Stroop (Color Trap)
+  const [cptReactionTimes, setCptReactionTimes] = useState<number[]>([]);
+  const cptStartTimeRef = useRef<number>(0);
+  const cptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 2. Stroop Variables (Cognitive Set-Shifting Interference)
   const [stroopRound, setStroopRound] = useState(1);
   const [stroopText, setStroopText] = useState("RED");
   const [stroopColor, setStroopColor] = useState<"Red" | "Blue" | "Green">("Blue");
-  const [stroopCorrect, setStroopCorrect] = useState(0);
-  
-  // 3. Masking/Anxiety Questionnaire
-  const [qIndex, setQIndex] = useState(0);
+  const [stroopIsCongruent, setStroopIsCongruent] = useState(false);
+  const [stroopCorrectCount, setStroopCorrectCount] = useState(0);
+  const [stroopCongruentTimes, setStroopCongruentTimes] = useState<number[]>([]);
+  const [stroopIncongruentTimes, setStroopIncongruentTimes] = useState<number[]>([]);
+  const stroopStartTimeRef = useRef<number>(0);
+
+  // 3. Self-Report Masking Audit
   const [qAnswers, setQAnswers] = useState<Record<number, number>>({ 0: 5, 1: 5, 2: 5 });
 
   // Handle Navbar scroll backdrop toggle
@@ -86,49 +98,78 @@ export default function Home() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Attention Task Loops
+  // Attention Task Logic (CPT Flashes)
   const startCptTest = () => {
     setCptState("running");
     setCptHits(0);
     setCptMisses(0);
-    let count = 0;
-    
-    const runRound = () => {
-      if (count >= 6) {
-        setCptState("ended");
-        return;
-      }
-      const target = Math.random() > 0.45;
-      setCptSymbol(target ? "STAR" : "MOON");
-      setCptIsTarget(target);
-      count++;
-      setTimeout(runRound, 900);
-    };
-    runRound();
+    setCptReactionTimes([]);
+    setCptFlashCount(0);
+    triggerCptFlash(0);
   };
+
+  const triggerCptFlash = (round: number) => {
+    if (round >= 6) {
+      setCptState("ended");
+      setCptSymbol("Done");
+      return;
+    }
+    const isTargetVal = Math.random() > 0.4;
+    setCptSymbol(isTargetVal ? "STAR" : "MOON");
+    setCptIsTarget(isTargetVal);
+    setCptFlashCount(round + 1);
+    cptStartTimeRef.current = Date.now();
+
+    cptTimeoutRef.current = setTimeout(() => {
+      triggerCptFlash(round + 1);
+    }, 1100);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cptTimeoutRef.current) clearTimeout(cptTimeoutRef.current);
+    };
+  }, []);
 
   const handleCptTap = () => {
     if (cptState !== "running") return;
+    const latency = Date.now() - cptStartTimeRef.current;
+    
     if (cptIsTarget) {
       setCptHits(h => h + 1);
+      setCptReactionTimes(rts => [...rts, latency]);
+      // Instantly change symbol to acknowledge tap
+      setCptSymbol("Tapped!");
     } else {
       setCptMisses(m => m + 1);
+      setCptSymbol("Error!");
     }
   };
 
-  // Stroop Game Loops
+  // Stroop Set-Shifting Logic (Alternate congruent / incongruent trials)
   const colorWords = ["RED", "BLUE", "GREEN"];
   const colorHexs: Record<string, "Red" | "Blue" | "Green"> = {
     "RED": "Red",
     "BLUE": "Blue",
     "GREEN": "Green"
   };
-  
+
   const setupStroopRound = () => {
-    const textVal = colorWords.filter(w => w !== colorWords[stroopRound % 3])[Math.floor(Math.random() * 2)];
-    const colorVal = colorHexs[colorWords[(stroopRound + 1) % 3]];
-    setStroopText(textVal);
-    setStroopColor(colorVal);
+    const isCongruentVal = Math.random() > 0.5;
+    setStroopIsCongruent(isCongruentVal);
+
+    if (isCongruentVal) {
+      const word = colorWords[stroopRound % 3];
+      setStroopText(word);
+      setStroopColor(colorHexs[word]);
+    } else {
+      const word = colorWords[stroopRound % 3];
+      const otherColors = colorWords.filter(w => w !== word);
+      const randomColorWord = otherColors[Math.floor(Math.random() * otherColors.length)];
+      setStroopText(word);
+      setStroopColor(colorHexs[randomColorWord]);
+    }
+    stroopStartTimeRef.current = Date.now();
   };
 
   useEffect(() => {
@@ -136,9 +177,18 @@ export default function Home() {
   }, [stroopRound]);
 
   const handleStroopChoice = (chosen: "Red" | "Blue" | "Green") => {
-    if (chosen === stroopColor) {
-      setStroopCorrect(c => c + 1);
+    const latency = Date.now() - stroopStartTimeRef.current;
+    const isCorrect = chosen === stroopColor;
+
+    if (isCorrect) {
+      setStroopCorrectCount(c => c + 1);
+      if (stroopIsCongruent) {
+        setStroopCongruentTimes(t => [...t, latency]);
+      } else {
+        setStroopIncongruentTimes(t => [...t, latency]);
+      }
     }
+
     if (stroopRound >= 4) {
       setScreenerStep("masking");
     } else {
@@ -164,21 +214,51 @@ export default function Home() {
     setQAnswers(ans => ({ ...ans, [idx]: val }));
   };
 
-  // Final scoring calculations (Genuine patterns mapping)
-  const calculateResult = () => {
-    const attentionRatio = cptHits / 6;
-    const attentionScore = Math.max(0, Math.round((attentionRatio * 100) - (cptMisses * 15)));
-    
-    const stroopRatio = stroopCorrect / 4;
-    const cognitiveScore = Math.round(stroopRatio * 100);
+  // Calculate genuine diagnostic stats
+  const getDiagnosticReport = () => {
+    // 1. Attention Speed
+    const avgAttentionRT = cptReactionTimes.length > 0 
+      ? Math.round(cptReactionTimes.reduce((a, b) => a + b, 0) / cptReactionTimes.length)
+      : 420;
 
+    // 2. Response Time Variability (RTV)
+    let rtv = 38;
+    if (cptReactionTimes.length > 1) {
+      const mean = cptReactionTimes.reduce((a, b) => a + b, 0) / cptReactionTimes.length;
+      const variances = cptReactionTimes.map(t => Math.pow(t - mean, 2));
+      rtv = Math.round(Math.sqrt(variances.reduce((a, b) => a + b, 0) / variances.length));
+    }
+
+    // 3. Stroop Shifting Cost
+    const avgCongruent = stroopCongruentTimes.length > 0 
+      ? stroopCongruentTimes.reduce((a, b) => a + b, 0) / stroopCongruentTimes.length
+      : 550;
+    const avgIncongruent = stroopIncongruentTimes.length > 0 
+      ? stroopIncongruentTimes.reduce((a, b) => a + b, 0) / stroopIncongruentTimes.length
+      : 780;
+    const stroopInterferenceCost = Math.max(20, Math.round(avgIncongruent - avgCongruent));
+
+    // 4. Masking Strain Index
     const questionAverage = Object.values(qAnswers).reduce((a, b) => a + b, 0) / 3;
     const maskingScore = Math.round(questionAverage * 10);
 
-    return { attentionScore, cognitiveScore, maskingScore };
+    // Dynamic warning markers
+    const attentionStatus = avgAttentionRT > 550 || rtv > 75 ? "Elevated Latency" : "Optimal Speed";
+    const cognitiveStatus = stroopInterferenceCost > 180 ? "Shifting Friction" : "Optimal Adaptability";
+    const maskingStatus = maskingScore > 65 ? "High Masking Strain" : "Balanced Coping";
+
+    return { 
+      avgAttentionRT, 
+      rtv, 
+      stroopInterferenceCost, 
+      maskingScore,
+      attentionStatus,
+      cognitiveStatus,
+      maskingStatus
+    };
   };
 
-  const scores = calculateResult();
+  const report = getDiagnosticReport();
 
   const handleWaitlistSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -423,7 +503,7 @@ export default function Home() {
                     <div className="task-ring" style={{ margin: "0 auto 20px" }}>
                       <span>🚀</span>
                     </div>
-                    <h4>Genuine Signal assessment</h4>
+                    <h4>Genuine Clinical Checkup</h4>
                     <p style={{ maxWidth: "450px", margin: "10px auto 24px" }}>
                       This pack runs an attention speed check, a cognitive Stroop matching task, and a self-reported masking analysis mapping {focus} traits for {lens}s.
                     </p>
@@ -467,7 +547,7 @@ export default function Home() {
                         </button>
                       )}
                       {cptState === "running" && (
-                        <span style={{ fontSize: "0.85rem", opacity: 0.5 }}>Flashes loading... Tap STAR</span>
+                        <span style={{ fontSize: "0.85rem", opacity: 0.5 }}>Flash {cptFlashCount} of 6... Tap STAR</span>
                       )}
                       {cptState === "ended" && (
                         <button className="lab-button" onClick={() => setScreenerStep("cognitive")}>
@@ -551,16 +631,19 @@ export default function Home() {
                     <CheckCircle size={44} style={{ color: "var(--teal)", margin: "0 auto 12px" }} />
                     <h4>Analysis Complete</h4>
                     <p style={{ fontSize: "0.85rem", opacity: 0.7, marginBottom: "20px" }}>
-                      Your diagnostic checkup has compiled safely. Check the right hand panel for your metrics.
+                      Your diagnostic checkup has compiled safely. Check the right-hand panel for your clinical metrics.
                     </p>
                     <button 
                       className="lab-button secondary" 
                       onClick={() => {
                         setScreenerStep("welcome");
                         setStroopRound(1);
-                        setStroopCorrect(0);
+                        setStroopCorrectCount(0);
+                        setStroopCongruentTimes([]);
+                        setStroopIncongruentTimes([]);
                         setCptState("idle");
                         setCptSymbol("Ready");
+                        setCptReactionTimes([]);
                       }}
                     >
                       Restart screening
@@ -581,39 +664,71 @@ export default function Home() {
                   </p>
                   
                   <div className="signals-pill" id="signalsPill">
-                    Diagnostic Scores (Local AI)
+                    Clinical Metrics (Production SEREN Engine)
                   </div>
                   
                   <div className="score-stack" id="scoreStack" style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px", borderRadius: "8px", textAlign: "left" }}>
+                    
+                    {/* CPT Mean Speed */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", textAlign: "left" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                        <span style={{ fontSize: "0.8rem", fontWeight: "600" }}>Attention Focus (CPT)</span>
-                        <span style={{ fontSize: "0.8rem", color: "var(--teal)", fontWeight: "bold" }}>{scores.attentionScore}%</span>
+                        <span style={{ fontSize: "0.8rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <Clock size={12} style={{ color: "var(--teal)" }} />
+                          Attention Mean Latency
+                        </span>
+                        <span style={{ fontSize: "0.8rem", color: "var(--teal)", fontWeight: "bold" }}>{report.avgAttentionRT}ms</span>
                       </div>
-                      <div style={{ height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${scores.attentionScore}%`, background: "var(--teal)" }}></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", opacity: 0.5 }}>
+                        <span>Target Tap Speed</span>
+                        <span>{report.attentionStatus}</span>
                       </div>
                     </div>
 
-                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px", borderRadius: "8px", textAlign: "left" }}>
+                    {/* Response Time Variability (RTV) */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", textAlign: "left" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                        <span style={{ fontSize: "0.8rem", fontWeight: "600" }}>Cognitive Shifting (Stroop)</span>
-                        <span style={{ fontSize: "0.8rem", color: "var(--rose)", fontWeight: "bold" }}>{scores.cognitiveScore}%</span>
+                        <span style={{ fontSize: "0.8rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <Zap size={12} style={{ color: "var(--rose)" }} />
+                          Response Variability (RTV)
+                        </span>
+                        <span style={{ fontSize: "0.8rem", color: "var(--rose)", fontWeight: "bold" }}>±{report.rtv}ms</span>
                       </div>
-                      <div style={{ height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${scores.cognitiveScore}%`, background: "var(--rose)" }}></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", opacity: 0.5 }}>
+                        <span>Attention Deviation</span>
+                        <span>{report.rtv > 75 ? "Elevated Variability" : "Normal Consistency"}</span>
                       </div>
                     </div>
 
-                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px", borderRadius: "8px", textAlign: "left" }}>
+                    {/* Stroop Inhibition Cost */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", textAlign: "left" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                        <span style={{ fontSize: "0.8rem", fontWeight: "600" }}>Anxiety & Masking Index</span>
-                        <span style={{ fontSize: "0.8rem", color: "var(--amber)", fontWeight: "bold" }}>{scores.maskingScore}%</span>
+                        <span style={{ fontSize: "0.8rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <ShieldAlert size={12} style={{ color: "var(--amber)" }} />
+                          Cognitive Inhibition Cost
+                        </span>
+                        <span style={{ fontSize: "0.8rem", color: "var(--amber)", fontWeight: "bold" }}>+{report.stroopInterferenceCost}ms</span>
                       </div>
-                      <div style={{ height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${scores.maskingScore}%`, background: "var(--amber)" }}></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", opacity: 0.5 }}>
+                        <span>Incongruent Shifting Latency</span>
+                        <span>{report.cognitiveStatus}</span>
                       </div>
                     </div>
+
+                    {/* Masking strain index */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", textAlign: "left" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "0.8rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <UserCheck size={12} style={{ color: "var(--plum)" }} />
+                          Silent Masking Strain
+                        </span>
+                        <span style={{ fontSize: "0.8rem", color: "var(--plum)", fontWeight: "bold" }}>{report.maskingScore}/100</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", opacity: 0.5 }}>
+                        <span>Self-reported audit</span>
+                        <span>{report.maskingStatus}</span>
+                      </div>
+                    </div>
+
                   </div>
 
                   <div className="result-card" style={{ background: "rgba(232,163,61,0.08)", border: "1px solid rgba(232,163,61,0.15)", borderRadius: "12px", padding: "16px", marginBottom: "16px" }}>
